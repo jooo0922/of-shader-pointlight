@@ -1,6 +1,8 @@
 #include "ofApp.h"
 #include <vector> // calcTangents() 함수에서 동적 배열인 std::vector 컨테이너 클래스 템플릿을 사용하기 위해 해당 클래스를 include 시킴.
 
+#define USE_NIGHT_SKYBOX 1 // 어떤 큐브맵 텍스쳐를 전달해줄 지 분기처리에 사용할 매크로 상수 (매크로 관련 필기 하단 참고)
+
 // 탄젠트 벡터 계산 후, 메쉬의 버텍스 컬러 데이터에 임시로 저장해두는 함수
 void calcTangents(ofMesh& mesh) { // mesh 함수인자는 'ofMesh' 타입을 참조한다는 뜻. (diffuse-lighting 레포지토리 참조자 관련 설명 참고)
     using namespace glm;
@@ -65,12 +67,7 @@ void calcTangents(ofMesh& mesh) { // mesh 함수인자는 'ofMesh' 타입을 참
 }
 
 // 조명계산 최적화를 위해, 쉐이더에서 반복계산하지 않도록, c++ 에서 한번만 계산해줘도 되는 작업들을 수행하는 보조함수들
-glm::vec3 getLightDirection(DirectionalLight& l) {
-    // 조명벡터 direction에 -1을 곱해서 조명벡터의 방향을 뒤집어주고, 셰이더에서 내적계산을 해주기 위해 길이를 1로 정규화해서 맞춰줌.
-    return glm::normalize(l.direction * -1.0f);
-}
-
-glm::vec3 getLightColor(DirectionalLight& l) {
+glm::vec3 getLightColor(PointLight& l) {
     // vec3 값인 조명색상에 float 값인 조명강도를 스칼라배로 곱해줘서 조명색상의 밝기를 지정함.
     return l.color * l.intensity;
 }
@@ -81,7 +78,7 @@ void ofApp::setup(){
     ofEnableDepthTest(); // 깊이테스트를 활성화하여 z버퍼에 저장해서 각 요소에서 카메라와의 거리를 기준으로 앞뒤를 구분하여 렌더링할 수 있도록 함.
         
     // 이번에는 ofApp 맨 처음 설정에서 shieldMesh 를 바라보기 적당한 카메라 위치와 시야각을 지정함.
-    cam.pos = glm::vec3(0, 0.75f, 0.85f); // 카메라 위치는 z축으로 0.85만큼 안쪽으로 들어가게 하고, 조명 연산 결과를 확인하기 위해 y축으로도 살짝 올려줌
+    cam.pos = glm::vec3(0, 0.75f, 1.0f); // 카메라 위치는 z축으로 1.0만큼 안쪽으로 들어가게 하고, 조명 연산 결과를 확인하기 위해 y축으로도 살짝 올려줌
     cam.fov = glm::radians(90.0f); // 원근 프러스텀의 시야각은 일반 PC 게임에서는 90도 전후의 값을 사용함. -> 라디안 각도로 변환하는 glm 내장함수 radians() 를 사용함.
         
     planeMesh.load("plane.ply"); // planeMesh 메쉬로 사용할 모델링 파일 로드
@@ -92,8 +89,8 @@ void ofApp::setup(){
     
     cubeMesh.load("cube.ply"); // cubeMesh 메쉬로 사용할 모델링 파일 로드
 
-    waterShader.load("water.vert", "water.frag"); // planeMesh 에 노말맵을 활용한 물셰이더를 적용하기 위한 셰이더 파일 로드
-    blinnPhong.load("mesh.vert", "blinn-phong.frag"); // shieldMesh 에 (노말맵)텍스쳐를 활용한 Blinn-phong 반사모델을 적용하기 위한 셰이더 파일 로드
+    waterShader.load("water.vert", "pointLightWater.frag"); // planeMesh 에 노말맵을 활용한 물셰이더를 적용하기 위한 셰이더 파일 로드
+    blinnPhong.load("mesh.vert", "pointLight.frag"); // shieldMesh 에 (노말맵)텍스쳐를 활용한 Blinn-phong 반사모델을 적용하기 위한 셰이더 파일 로드
     skyboxShader.load("skybox.vert", "skybox.frag"); // cubeMesh 에 큐브맵 텍스쳐를 적용한 셰이더를 적용하기 위한 셰이더 파일 로드
         
     waterNrm.load("water_nrm.png"); // planeMesh 의 조명계산에서 노말맵으로 사용할 텍스쳐 로드
@@ -103,15 +100,16 @@ void ofApp::setup(){
     specTex.load("shield_spec.png"); // shieldMesh 의 조명계산에서 스펙큘러 라이팅 계산에 사용할 텍스쳐 로드
     nrmTex.load("shield_normal.png"); // shieldMesh 의 조명계산에서 노말맵으로 사용할 텍스쳐 로드
     
-    // 커스텀 큐브맵 클래스를 활용해서 큐브맵 텍스쳐를 로드함. (이때, ofxEasyCubemap.cpp 의 load 함수가 받는 텍스쳐 순서를 잘 보고 전달할 것.)
+// 매크로 상수인 USE_NIGHT_SKYBOX 의 값이 0이냐 1이냐에 따라 각각의 큐브맵 텍스쳐를 로드할 수 있도록 조건문으로 분기처리함.
+#if USE_NIGHT_SKYBOX
+    cubemap.load("night_front.jpg", "night_back.jpg",
+            "night_right.jpg", "night_left.jpg",
+            "night_top.jpg", "night_bottom.jpg");
+#else
     cubemap.load("cube_front.jpg", "cube_back.jpg",
             "cube_right.jpg", "cube_left.jpg",
             "cube_top.jpg", "cube_bottom.jpg");
-        
-    // 2번째 큐브맵 텍스쳐를 로드하여 사용할 시 주석을 풀고 사용하면 됨.
-//    cubemap.load("cube2_front.jpg", "cube2_back.jpg",
-//            "cube2_right.jpg", "cube2_left.jpg",
-//            "cube2_top.jpg", "cube2_bottom.jpg");
+#endif
 }
 
 //--------------------------------------------------------------
@@ -120,7 +118,7 @@ void ofApp::update(){
 }
 
 // waterMesh 의 각종 변환행렬을 계산한 뒤, 유니폼 변수들을 전송해주면서 드로우콜을 호출하는 함수
-void ofApp::drawWater(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& view) {
+void ofApp::drawWater(PointLight& pointLight, glm::mat4& proj, glm::mat4& view) {
     using namespace glm;
     
     static float t = 0.0f; // static 을 특정 함수 내에서 사용하는 것을 '정적 지역 변수'라고 하며, 이 할당문은 drawWater() 함수 최초 호출 시 1번만 실행됨.
@@ -163,9 +161,10 @@ void ofApp::drawWater(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& vi
     shd.setUniformTexture("envMap", cubemap.getTexture(), 1); // 환경맵 반사를 적용하기 위해 사용할 큐브맵 텍스쳐 유니폼 변수로 전송
     shd.setUniform1f("time", t); // uv 스크롤링에 사용할 시간값 유니폼 변수로 전송
     
-    shd.setUniform3f("ambientCol", glm::vec3(0.1, 0.1, 0.1)); // 환경광으로 사용할 앰비언트 라이트 색상값을 유니폼 변수로 전송.
-    shd.setUniform3f("lightDir", getLightDirection(dirLight)); // 조명벡터를 음수화하여 뒤집어주고, 다시 정규화하여 길이를 1로 맞춘 뒤, 유니폼 변수로 전송
-    shd.setUniform3f("lightCol", getLightColor(dirLight)); // 조명색상을 조명강도와 곱해준 뒤, 유니폼 변수로 전송
+    shd.setUniform3f("ambientCol", glm::vec3(0.0, 0.0, 0.0)); // 환경광으로 사용할 앰비언트 라이트 색상값을 유니폼 변수로 전송.
+    shd.setUniform3f("lightPos", pointLight.position); // 포인트라이트 조명의 위치값을 유니폼 변수로 전송
+    shd.setUniform1f("lightRadius", pointLight.radius); // 포인트라이트 조명의 최대범위(포인트 라이트 구체 반지름)을 유니폼 변수로 전송
+    shd.setUniform3f("lightCol", getLightColor(pointLight)); // 조명색상을 조명강도와 곱해준 뒤, 유니폼 변수로 전송
     shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
     
     planeMesh.draw(); // planeMesh(waterMesh) 메쉬 드로우콜 호출하여 그려줌.
@@ -174,7 +173,7 @@ void ofApp::drawWater(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& vi
     // shd(waterShader) 사용 중단
 }
 
-void ofApp::drawSkybox(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& view) {
+void ofApp::drawSkybox(PointLight& pointLight, glm::mat4& proj, glm::mat4& view) {
     using namespace glm; // 이제부터 이 함수블록 내에서 glm 라이브러리에서 꺼내 쓸 함수 및 객체들은 'glm::' 을 생략해서 사용해도 됨.
     
     // cubeMesh 의 모델행렬 계산 (이동행렬만 적용)
@@ -200,7 +199,7 @@ void ofApp::drawSkybox(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& v
     glDepthFunc(GL_LESS); // 스카이박스를 다 그린 뒤 깊이비교모드를 원래대로 원상복구함. (깊이비교모드 관련 필기 하단 참고)
 }
 
-void ofApp::drawShield(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& view) {
+void ofApp::drawShield(PointLight& pointLight, glm::mat4& proj, glm::mat4& view) {
     using namespace glm;
     
     mat4 model = translate(vec3(0.0, 0.75, 0.0f)); // shieldMesh 의 모델행렬 계산 (이동행렬만 적용)
@@ -222,8 +221,9 @@ void ofApp::drawShield(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& v
     shd.setUniformTexture("envMap", cubemap.getTexture(), 3); // 환경맵 반사를 적용하기 위해 사용할 큐브맵 텍스쳐 유니폼 변수로 전송
     
     shd.setUniform3f("ambientCol", glm::vec3(0.1, 0.1, 0.1)); // 배경색과 동일한 앰비언트 라이트 색상값을 유니폼 변수로 전송.
-    shd.setUniform3f("lightDir", getLightDirection(dirLight)); // 조명벡터를 음수화하여 뒤집어주고, 다시 정규화하여 길이를 1로 맞춘 뒤, 유니폼 변수로 전송
-    shd.setUniform3f("lightCol", getLightColor(dirLight)); // 조명색상을 조명강도와 곱해준 뒤, 유니폼 변수로 전송
+    shd.setUniform3f("lightPos", pointLight.position); // 포인트라이트 조명의 위치값을 유니폼 변수로 전송
+    shd.setUniform1f("lightRadius", pointLight.radius); // 포인트라이트 조명의 최대범위(포인트 라이트 구체 반지름)을 유니폼 변수로 전송
+    shd.setUniform3f("lightCol", getLightColor(pointLight)); // 조명색상을 조명강도와 곱해준 뒤, 유니폼 변수로 전송
     shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
     
     shieldMesh.draw(); // shieldMesh 메쉬 드로우콜 호출하여 그려줌.
@@ -236,17 +236,16 @@ void ofApp::drawShield(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& v
 void ofApp::draw(){
     using namespace glm; // 이제부터 현재 블록 내에서 glm 라이브러리에서 꺼내 쓸 함수 및 객체들은 'glm::' 을 생략해서 사용해도 됨.
     
-    // 조명구조체 dirLight 에 조명데이터를 할당해 줌.
-    DirectionalLight dirLight; // 조명데이터 구조체인 DirectionLight 타입의 객체 변수 dirLight 선언
-    dirLight.direction = normalize(vec3(0.5, -1, -1)); // 조명벡터 방향 지정
-    dirLight.color = vec3(1, 1, 1); // 조명색상은 흰색으로 지정
-    dirLight.intensity = 1.0f; // 조명강도도 1로 지정. 참고로, 1보다 큰값으로 조명강도를 조명색상에 곱해줘봤자, 프래그먼트 셰이더는 (1, 1, 1, 1) 이상의 색상값을 처리할 수 없음.
-
-    // 물 셰이더에서 스펙큘러를 더 잘 보이게 하기 위해, 조명방향만 변경해 준 조명데이터를 따로 만듦.
-    DirectionalLight waterLight;
-    waterLight.direction = normalize(vec3(0.5, -1, 1)); // 조명벡터 방향만 바꿈
-    waterLight.color = vec3(1, 1, 1);
-    waterLight.intensity = 1.0f;
+    // sin 함수로 포인트라이트 조명 위치를 매 프레임마다 -1 ~ 1 사이로 왕복하기 위해 sin 함수에 매 프레임마다 넣어줄 값을 계산함.
+    static float t = 0.0f; // static 을 특정 함수 내에서 사용하는 것을 '정적 지역 변수'라고 하며, 이 할당문은 drawWater() 함수 최초 호출 시 1번만 실행됨.
+    t += ofGetLastFrameTime(); // 이전 프레임과 현재 프레임의 시간 간격인 '델타타임'을 리턴받는 함수를 호출해서 sin함수의 인자로 사용할 시간값 t에 매 프레임마다 더해줌.
+    
+    // 조명구조체 pointLight 에 조명데이터를 할당해 줌.
+    PointLight pointLight; // 조명데이터 구조체인 PointLight 타입의 객체 변수 pointLight 선언
+    pointLight.color = vec3(1, 1, 1); // 조명색상은 흰색으로 지정
+    pointLight.radius = 1.0f; // 포인트라이트 조명의 최대범위(조명 반경, 반지름.)을 1로 지정.
+    pointLight.position = vec3(sin(t), 0.5, 0.25); // sin 함수로 포인트라이트 조명위치 x좌표를 매 프레임마다 -1 ~ 1 사이로 왕복해서 전달하도록 지정.
+    pointLight.intensity = 1.0f; // 조명강도도 1로 지정. 참고로, 1보다 큰값으로 조명강도를 조명색상에 곱해줘봤자, 프래그먼트 셰이더는 (1, 1, 1, 1) 이상의 색상값을 처리할 수 없음.
     
     // 투영행렬 계산
     float aspect = 1024.0f / 768.0f; // main.cpp 에서 정의한 윈도우 실행창 사이즈를 기준으로 원근투영행렬의 종횡비(aspect)값을 계산함.
@@ -256,9 +255,9 @@ void ofApp::draw(){
     mat4 view = inverse(translate(cam.pos)); // 뷰행렬은 카메라 움직임에 반대방향으로 나머지 대상들을 움직이는 변환행렬이므로, glm::inverse() 내장함수로 역행렬을 구해야 함.
     
     // 이후의 연산은 shield 메쉬 드로우 함수와 water 메쉬 드로우 함수로 쪼개서 추출함.
-    drawShield(dirLight, proj, view);
-    drawWater(waterLight, proj, view);
-    drawSkybox(dirLight, proj, view); // cubeMesh 메쉬 드로우 함수를 추출하여 정의한 뒤 호출함.
+    drawShield(pointLight, proj, view);
+    drawWater(pointLight, proj, view);
+    drawSkybox(pointLight, proj, view); // cubeMesh 메쉬 드로우 함수를 추출하여 정의한 뒤 호출함.
 }
 
 //--------------------------------------------------------------
@@ -340,4 +339,20 @@ void ofApp::dragEvent(ofDragInfo dragInfo){
  
  스카이박스를 전부 그리고 나면 맨 마지막에
  깊이비교모드를 GL_LESS 로 원상복귀시킴.
+ */
+
+/**
+ #define 매크로 상수
+ 
+ c++ 에서는 프로그램 내에서 컴파일러가
+ 매크로를 만났을 때 대체할 문자열 또는 숫자값을 정의할 때 사용함.
+ 
+ 컴파일러가 컴파일 시작 전,
+ #define 으로 정의된 기호를 지정된 숫자나 문자열로
+ 변환시킬 수 있도록 함.
+ 
+ 매크로는 변수가 아니므로, 런타임 이전에
+ 컴파일러가 해당 기호를 마주치면 지정된 값으로
+ 변환해주는 형태이므로 변수보다 처리속도가 빠르고,
+ 코드의 가독성 및 유지보수를 향상시키는 이점이 있다고 함.
  */
